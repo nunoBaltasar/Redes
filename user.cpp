@@ -56,9 +56,81 @@ class User{
         }
 };
 
-void login();
-void unregister();
-void logout();
+bool checkLogin(const string& input, User& user){
+    stringstream ss(input);
+    string word, uid, pw;
+    ss >> word;
+    if (ss.eof()){
+        cout << "Too few arguments\n";
+        return false;
+    }
+    ss >> uid;
+    ss >> pw;
+    if (ss >> word){
+        cout << "Too many arguments\n";
+        return false;
+    }
+
+    if (uid.length() != 6) {
+        cout << "Invalid UID\n";
+        return false;
+    }
+    for (int i = 0; i <6; i++){
+        if ((i == 0 && uid[i]=='0') || !isdigit(uid[i])){
+            cout << "Invalid UID\n";
+            return false;
+        }
+    }
+    if (pw.length() != 8){
+        cout << "Invalid password\n";
+        return false;
+    }
+    for (int i = 0; i < 8; i++){
+        if (!isalnum(pw[i])){
+            cout << "Invalid password\n";
+            return false;
+        }
+    }
+    
+    user.setPW(pw);
+    user.setUID(uid);
+    return true;
+}
+void checkResponseLogin(char* buffer, User& user){
+    if (!strcmp(buffer, "RLI OK\n")){
+        cout << "successful login\n";
+        user.setLIN();
+    }else if (!strcmp(buffer, "RLI NOK\n")){
+        cout << "incorrect login\n";
+    }else if (!strcmp(buffer, "RLI REG\n")){
+        cout << "new user registered\n";
+        user.setLIN();
+    }else if (!strcmp(buffer, "ERR\n")){
+        cout << "Error: idk\n";
+    }
+}
+void checkResponseUNR(char* buffer, User& user){
+    if (!strcmp(buffer, "RUR OK\n")){
+        cout << "successful unregister\n";
+        user.setLOUT();
+    }else if (!strcmp(buffer, "RUR NOK\n")){
+        cout << "unknown user\n";
+    }else if (!strcmp(buffer, "RUR WSP\n")){
+        cout << "incorrect unregister attempt\n";
+    }else if (!strcmp(buffer, "ERR\n")){
+        cout << "Error:\n";
+    }
+}
+void checkRespondeLOUT(char* buffer, User& user){  
+    if (!strcmp(buffer, "RLO OK\n")){
+        cout << "successful logout\n";
+        user.setLOUT();
+    }else if (!strcmp(buffer, "RLO NLG\n")){
+        cout << "user not logged in\n";
+    }else if (!strcmp(buffer, "RLO WRP\n")){
+        cout << "unknown user\n";
+    }
+}
 
 //é preciso tratar do sigpipe
 int main(int argc, char *argv[]){
@@ -95,6 +167,11 @@ int main(int argc, char *argv[]){
     struct sockaddr_in addr;
     struct addrinfo hints, *res;
 
+    //if (setsockpt(state.udp_fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv))==-1){
+    //    perror("error setting udp socket");
+    //    controlledExit(state.udp_fd, 1, state.ds_addr);
+    //}
+
     fd = socket(AF_INET, SOCK_DGRAM, 0);
     if (fd == -1) {
         cout << "ERR: ";
@@ -125,62 +202,25 @@ int main(int argc, char *argv[]){
         string word;
         
         if (command == "login"){
-            string uid;
-            string pw;
-            ss >> uid;
-            ss >> pw;
-            if (ss >> word){
-                cout << "Too many arguments\n";
-                continue;
-            }
-
-            if (uid.length() != 6) {
-                cout << "Invalid UID\n";
-                continue;
-            }
-            for (int i = 0; i <6; i++){
-                if ((i == 0 && uid[i]=='0') || !isdigit(uid[i])){
-                    cout << "Invalid UID\n";
-                    continue;
-                }
-            }
-            if (pw.length() != 8){
-                cout << "Invalid password\n";
-                continue;
-            }
-            for (int i; i < 8; i++){
-                if (!isalnum(pw[i])){
-                    cout << "Invalid password\n";
-                    break;
-                }
-            }
+            if (!checkLogin(input, user)) continue;
             
-            user.setPW(pw);
-            user.setUID(uid);
-            string request = "LIN " + uid + " " + pw + " " + peerport + '\n';
+            string request = "LIN " + user.getUID() + " " + user.getPW() + " " + peerport + '\n';
             int size = request.length();
             n = sendto(fd, request.c_str(), size,0, res->ai_addr, res->ai_addrlen);
-            if (n == -1) exit(1);
+            if (n == -1) {
+                cout << "Error:\n";
+                break;
+            }
             addrlen = sizeof(addr);
             n = recvfrom(fd, buffer, 128, 0, (struct sockaddr*) &addr, &addrlen);
-            
+            if (n==-1){
+                cout << "Error: faaaah\n";
+                break;
+            }
             if (n >= 0) {buffer[n] = '\0';}
 
-            if (n==-1){
-                cout << n + '\n';
-                exit(1);
-            }
+            checkResponseLogin(buffer, user);
              
-            if (!strcmp(buffer, "RLI OK\n")){
-                cout << "successful login\n";
-                user.setLIN();
-            }else if (!strcmp(buffer, "RLI NOK\n")){
-                cout << "incorrect login\n";
-            }else if (!strcmp(buffer, "RLI REG\n")){
-                cout << "new user registered\n";
-                user.setLIN();
-            }   
-
         }else if (command == "unregister"){
             if (ss >> word){
                 cout << "Too many arguments\n";
@@ -195,23 +235,17 @@ int main(int argc, char *argv[]){
             if (n == -1) exit(1);
             addrlen = sizeof(addr);
             n = recvfrom(fd, buffer, 128, 0, (struct sockaddr*) &addr, &addrlen);
-                    
             if (n >= 0) {buffer[n] = '\0';}
-            if (!strcmp(buffer, "RUR OK\n")){
-                cout << "successful unregister\n";
-                user.setLOUT();
-            }else if (!strcmp(buffer, "RUR NOK\n")){
-                cout << "unknown user\n";
-            }else if (!strcmp(buffer, "RUR WSP\n")){
-                cout << "incorrect unregister attempt\n";
-            }
+            
+            checkResponseUNR(buffer, user);
+
         }else if (command == "logout"){
-            if (!user.getLIN()){
-                cout << "user not logged in\n";
-                continue;
-            }
             if (ss >> word){
                 cout << "Too many arguments\n";
+                continue;
+            }
+            if (!user.getLIN()){
+                cout << "user not logged in\n";
                 continue;
             }
             string request = "LOU " + user.getUID() +" " + user.getPW() + '\n';
@@ -219,16 +253,9 @@ int main(int argc, char *argv[]){
             if (n==-1) exit(1);
             addrlen = sizeof(addr);
             n = recvfrom(fd, buffer, 128, 0, (struct sockaddr*) &addr, &addrlen);
-                    
             if (n >= 0) {buffer[n] = '\0';}
-            if (!strcmp(buffer, "RLO OK\n")){
-                cout << "successful logout\n";
-                user.setLOUT();
-            }else if (!strcmp(buffer, "RLO NLG\n")){
-                cout << "user not logged in\n";
-            }else if (!strcmp(buffer, "RLO WRP\n")){
-                cout << "unknown user\n";
-            }
+            checkRespondeLOUT(buffer, user);
+
         }else if (command == "exit"){
             if (ss >> word){
                 cout << "Too many arguments\n";
@@ -238,6 +265,8 @@ int main(int argc, char *argv[]){
                 continue;
             }
             break;
+        }else{
+            cout << "Invalid command\n";
         }
 
     }
