@@ -15,9 +15,9 @@
 
 using namespace std;
 
-volatile sig_atomic_t stopped = 0;
+static volatile sig_atomic_t stopped = 0;
 
-void signalHandler(int sig){
+static void signalHandler(int sig){
     (void)sig;
     stopped = 1;
 }
@@ -56,89 +56,71 @@ class User{
         }
 };
 
-bool checkLogin(const string& input, User& user){
-    stringstream ss(input);
-    string word, uid, pw;
-    ss >> word;
 
-    if (!(ss >> uid)){
-        cout << "Too few arguments\n";
-        return false;
-    }
-    if (!(ss >> pw)){
-        cout << "Too few arguments\n";
-        return false;
-    }
-    if (ss >> word){
-        cout << "Too many arguments\n";
-        return false;
-    }
+static void checkResponseLogin(const string& reply, User& user, const string& uid, const string& pw){
+    if      (reply == "RLI OK\n")  { cout << "successful login\n";    user.setUID(uid); user.setPW(pw); user.setLIN(); }
+    else if (reply == "RLI NOK\n") { cout << "incorrect login\n";                                                      }
+    else if (reply == "RLI REG\n") { cout << "new user registered\n"; user.setUID(uid); user.setPW(pw); user.setLIN(); }
+    else if (reply == "ERR\n")     { cout << "protocol error\n";                                                       }
+    else                           { cout << "unexpected reply: " << reply;                                            }
+}
+
+static void checkRespondeLOUT(const string& reply, User& user){
+    if      (reply == "RLO OK\n")  { cout << "successful logout\n";    user.setLOUT(); }
+    else if (reply == "RLO NLG\n") { cout << "user not logged in\n";                  }
+    else if (reply == "RLO WRP\n") { cout << "incorrect password\n";                  }
+    else if (reply == "RLO UNR\n") { cout << "unknown user\n";                        }
+    else if (reply == "ERR\n")     { cout << "protocol error\n";                      }
+    else                           { cout << "unexpected reply: " << reply;           }
+}
+
+static void checkResponseUNR(const string& reply, User& user){
+    if      (reply == "RUR OK\n")  { cout << "successful unregister\n";         user.setLOUT(); }
+    else if (reply == "RUR NOK\n") { cout << "unknown user or not logged in\n";                 }
+    else if (reply == "RUR WRP\n") { cout << "incorrect password\n";                            }
+    else if (reply == "RUR UNR\n") { cout << "user not registered\n";                           }
+    else if (reply == "ERR\n")     { cout << "protocol error\n";                                }
+    else                           { cout << "unexpected reply: " << reply;                     }
+}
+
+
+static void cmd_login(const string& uid, const string& pw, const string& peerport,
+                      User& user, int fd, addrinfo* res, sockaddr_in& addr){
     if (user.getLIN()){
-        cout << "User already loggin in\n";
-        return false;
+        cout << "Already logged in as " << user.getUID() << "\n";
+        return;
     }
     if (!validate_uid(uid)){
-        cout << "Invalid UID\n";
-        return false;
+        cout << "Invalid UID (must be exactly 6 numeric digits)\n";
+        return;
     }
     if (!validate_password(pw)){
-        cout << "Invalid password\n";
-        return false;
+        cout << "Invalid password (must be exactly 8 alphanumeric characters)\n";
+        return;
     }
 
-    user.setPW(pw);
-    user.setUID(uid);
-    return true;
+    char buffer[128];
+    string request = "LIN " + uid + " " + pw + " " + peerport + '\n';
+    if (sendAndReceive(buffer, sizeof(buffer), request, fd, res, addr) == -1) return;
+    checkResponseLogin(string(buffer), user, uid, pw);
 }
 
-void checkResponseLogin(char* buffer, User& user){
-    if (!strcmp(buffer, "RLI OK\n")){
-        cout << "successful login\n";
-        user.setLIN();
-    }else if (!strcmp(buffer, "RLI NOK\n")){
-        cout << "incorrect login\n";
-    }else if (!strcmp(buffer, "RLI REG\n")){
-        cout << "new user registered\n";
-        user.setLIN();
-    }else if (!strcmp(buffer, "ERR\n")){
-        cout << "protocol error\n";
-    }else{
-        cout << "unexpected reply: " << buffer;
-    }
+static void cmd_logout(User& user, int fd, addrinfo* res, sockaddr_in& addr){
+    if (!user.getLIN()){ cout << "No user is currently logged in\n"; return; }
+
+    char buffer[128];
+    string request = "LOU " + user.getUID() + " " + user.getPW() + '\n';
+    if (sendAndReceive(buffer, sizeof(buffer), request, fd, res, addr) == -1) return;
+    checkRespondeLOUT(string(buffer), user);
 }
 
-void checkResponseUNR(char* buffer, User& user){
-    if (!strcmp(buffer, "RUR OK\n")){
-        cout << "successful unregister\n";
-        user.setLOUT();
-    }else if (!strcmp(buffer, "RUR NOK\n")){
-        cout << "unknown user or not logged in\n";
-    }else if (!strcmp(buffer, "RUR WRP\n")){  // fixed: was "WSP"
-        cout << "incorrect password\n";
-    }else if (!strcmp(buffer, "RUR UNR\n")){  // added missing case
-        cout << "user not registered\n";
-    }else if (!strcmp(buffer, "ERR\n")){
-        cout << "protocol error\n";
-    }else{
-        cout << "unexpected reply: " << buffer;
-    }
-}
+static void cmd_unregister(User& user, int fd, addrinfo* res, sockaddr_in& addr){
+    if (!user.getLIN()){ cout << "No user is currently logged in\n"; return; }
 
-void checkRespondeLOUT(char* buffer, User& user){
-    if (!strcmp(buffer, "RLO OK\n")){
-        cout << "successful logout\n";
-        user.setLOUT();
-    }else if (!strcmp(buffer, "RLO NLG\n")){
-        cout << "user not logged in\n";
-    }else if (!strcmp(buffer, "RLO WRP\n")){ 
-        cout << "incorrect password\n";
-    }else if (!strcmp(buffer, "RLO UNR\n")){ 
-        cout << "unknown user\n";
-    }else if (!strcmp(buffer, "ERR\n")){
-        cout << "protocol error\n";
-    }else{
-        cout << "unexpected reply: " << buffer;
-    }
+    char buffer[128];
+    string request = "UNR " + user.getUID() + " " + user.getPW() + '\n';
+    if (sendAndReceive(buffer, sizeof(buffer), request, fd, res, addr) == -1) return;
+    checkResponseUNR(string(buffer), user);
 }
 
 int main(int argc, char *argv[]){
@@ -147,12 +129,11 @@ int main(int argc, char *argv[]){
     string dsport = "59000";
     bool hasPeerport = false;
 
-    struct sigaction signalAction{};
-    sigemptyset(&signalAction.sa_mask);
-    signalAction.sa_handler = signalHandler;
-    signalAction.sa_flags = 0;
-    sigaction(SIGINT, &signalAction, nullptr);
-
+    struct sigaction sa{};
+    sigemptyset(&sa.sa_mask);
+    sa.sa_handler = signalHandler;
+    sa.sa_flags   = 0;
+    sigaction(SIGINT, &sa, nullptr);
     signal(SIGPIPE, SIG_IGN);
 
     for (int i = 1; i < argc; i++){
@@ -173,7 +154,6 @@ int main(int argc, char *argv[]){
             exit(1);
         }
     }
-
     if (!hasPeerport){
         cout << "Usage: " << argv[0] << " -m peerport [-n DSIP] [-p DSport]\n";
         exit(1);
@@ -203,52 +183,38 @@ int main(int argc, char *argv[]){
         cout << "Error: socket timeout\n";
         freeaddrinfo(res);
         close(fd);
-        return 1;
+        exit(1);
     }
 
     string input, command;
     User user{};
-    char buffer[128];
 
     while (!stopped && getline(cin, input)){
         stringstream ss(input);
         if (!(ss >> command)) continue;
-        string word;
+        string w1, w2, extra;
 
         if (command == "login"){
-            if (user.getLIN()){
-                cout << "Already logged in as " << user.getUID() << "\n";
-                continue;
+            if (!(ss >> w1) || !(ss >> w2) || (ss >> extra)){
+                cout << "login: expected 2 arguments (UID password)\n"; continue;
             }
-            if (!checkLogin(input, user)) continue;
-
-            string request = "LIN " + user.getUID() + " " + user.getPW() + " " + peerport + '\n';
-            if (sendAndReceive(buffer, sizeof(buffer), request, fd, res, addr) == -1) continue;
-            checkResponseLogin(buffer, user);
-
-        }else if (command == "unregister"){
-            if (ss >> word){ cout << "Too many arguments\n"; continue; }
-            if (!user.getLIN()){ cout << "No user is currently logged in\n"; continue; }
-
-            string request = "UNR " + user.getUID() + " " + user.getPW() + '\n';
-            if (sendAndReceive(buffer, sizeof(buffer), request, fd, res, addr) == -1) continue;
-            checkResponseUNR(buffer, user);
+            cmd_login(w1, w2, peerport, user, fd, res, addr);
 
         }else if (command == "logout"){
-            if (ss >> word){ cout << "Too many arguments\n"; continue; }
-            if (!user.getLIN()){ cout << "No user is currently logged in\n"; continue; }
+            if (ss >> extra){ cout << "logout: takes no arguments\n"; continue; }
+            cmd_logout(user, fd, res, addr);
 
-            string request = "LOU " + user.getUID() + " " + user.getPW() + '\n';
-            if (sendAndReceive(buffer, sizeof(buffer), request, fd, res, addr) == -1) continue;
-            checkRespondeLOUT(buffer, user);
+        }else if (command == "unregister"){
+            if (ss >> extra){ cout << "unregister: takes no arguments\n"; continue; }
+            cmd_unregister(user, fd, res, addr);
 
         }else if (command == "exit"){
-            if (ss >> word){ cout << "Too many arguments\n"; continue; }
-            if (user.getLIN()){ cout << "Please logout before exiting\n"; continue; }
+            if (ss >> extra){ cout << "exit: takes no arguments\n"; continue; }
+            if (user.getLIN()){ cout << "please logout before exiting\n"; continue; }
             break;
 
         }else{
-            cout << "Invalid command\n";
+            cout << "unknown command '" << command << "'\n";
         }
     }
 
