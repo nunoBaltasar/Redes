@@ -70,6 +70,10 @@ bool checkLogin(const string& input, User& user){
         cout << "Too many arguments\n";
         return false;
     }
+    if (user.getLIN()){
+        cout << "User already loggin in\n";
+        return false;
+    }
 
     if (uid.length() != 6) {
         cout << "Invalid UID\n";
@@ -132,6 +136,16 @@ void checkRespondeLOUT(char* buffer, User& user){
     }
 }
 
+void sendAndReceive(char *buffer, User& user, string request, int fd, addrinfo* res, sockaddr_in addr){
+    int n;
+    socklen_t addrlen;
+    n = sendto(fd, request.c_str(), request.length(), 0, res->ai_addr, res->ai_addrlen);
+    if (n == -1) exit(1);
+    addrlen = sizeof(addr);
+    n = recvfrom(fd, buffer, 128, 0, (struct sockaddr*) &addr, &addrlen);
+    if (n >= 0) {buffer[n] = '\0';}
+}
+
 //é preciso tratar do sigpipe
 int main(int argc, char *argv[]){
     string peerport;
@@ -166,12 +180,9 @@ int main(int argc, char *argv[]){
     socklen_t addrlen;
     struct sockaddr_in addr;
     struct addrinfo hints, *res;
-
-    //if (setsockpt(state.udp_fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv))==-1){
-    //    perror("error setting udp socket");
-    //    controlledExit(state.udp_fd, 1, state.ds_addr);
-    //}
-
+    struct timeval tmout;
+    tmout.tv_sec = 6.7;
+    tmout.tv_usec = 0;
     fd = socket(AF_INET, SOCK_DGRAM, 0);
     if (fd == -1) {
         cout << "ERR: ";
@@ -196,6 +207,13 @@ int main(int argc, char *argv[]){
     signalAction.sa_flags = 0;
     sigaction(SIGINT, &signalAction, nullptr);
     
+    if (setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tmout, sizeof(tmout)) < 0){
+        cout << "Error: socket timeout";
+        freeaddrinfo(res);
+        close(fd);
+        return 0;
+    }
+
     while (getline(cin, input)){
         stringstream ss(input);
         ss >> command;
@@ -205,23 +223,13 @@ int main(int argc, char *argv[]){
             if (!checkLogin(input, user)) continue;
             
             string request = "LIN " + user.getUID() + " " + user.getPW() + " " + peerport + '\n';
-            int size = request.length();
-            n = sendto(fd, request.c_str(), size,0, res->ai_addr, res->ai_addrlen);
-            if (n == -1) {
-                cout << "Error:\n";
-                break;
-            }
-            addrlen = sizeof(addr);
-            n = recvfrom(fd, buffer, 128, 0, (struct sockaddr*) &addr, &addrlen);
-            if (n==-1){
-                cout << "Error: faaaah\n";
-                break;
-            }
-            if (n >= 0) {buffer[n] = '\0';}
+            
+            sendAndReceive(buffer, user, request, fd, res, addr);
 
             checkResponseLogin(buffer, user);
              
         }else if (command == "unregister"){
+            //nao sei como verificar reply nok e wrp
             if (ss >> word){
                 cout << "Too many arguments\n";
                 continue;
@@ -229,14 +237,11 @@ int main(int argc, char *argv[]){
             if (!user.getLIN()){
                 cout << "user not logged in\n";
                 continue;
-            }
+            }       
             string request = "UNR " + user.getUID() +" " + user.getPW() + '\n';
-            n = sendto(fd, request.c_str(), request.length(), 0, res->ai_addr, res->ai_addrlen);
-            if (n == -1) exit(1);
-            addrlen = sizeof(addr);
-            n = recvfrom(fd, buffer, 128, 0, (struct sockaddr*) &addr, &addrlen);
-            if (n >= 0) {buffer[n] = '\0';}
-            
+
+            sendAndReceive(buffer, user, request, fd, res, addr);
+
             checkResponseUNR(buffer, user);
 
         }else if (command == "logout"){
@@ -249,13 +254,28 @@ int main(int argc, char *argv[]){
                 continue;
             }
             string request = "LOU " + user.getUID() +" " + user.getPW() + '\n';
-            n = sendto(fd, request.c_str(), request.length(), 0, res->ai_addr, res->ai_addrlen);
-            if (n==-1) exit(1);
-            addrlen = sizeof(addr);
-            n = recvfrom(fd, buffer, 128, 0, (struct sockaddr*) &addr, &addrlen);
-            if (n >= 0) {buffer[n] = '\0';}
+            
+            sendAndReceive(buffer, user, request, fd, res, addr);
+
             checkRespondeLOUT(buffer, user);
 
+
+        }else if(command == "publish filename label"){
+            string fn = "fillename";
+            if (FILE *file = fopen(fn.c_str(), "r")) {
+                fclose(file);
+            } else {
+                cout << "There is no file to send in the current directory\n";
+                continue;
+            }
+            continue;
+            
+        }else if (command == "list"){ //nao sei qual o tamanho do buffer caso receba mt nomes
+            string request = "LST\n";
+            sendAndReceive(buffer, user, request, fd, res, addr);
+
+            if (!strcmp(buffer, "RLS OK"))
+            continue;
         }else if (command == "exit"){
             if (ss >> word){
                 cout << "Too many arguments\n";
