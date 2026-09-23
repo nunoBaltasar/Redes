@@ -1,6 +1,7 @@
+#include "protocol.h"
+
 #include <sstream>
 #include <iostream>
-#include <vector>
 
 #include <unistd.h>
 #include <stdlib.h>
@@ -11,7 +12,6 @@
 #include <netdb.h>
 #include <string.h>
 #include <csignal>
-#include <cerrno>
 
 using namespace std;
 
@@ -29,8 +29,8 @@ class User{
         int isLIN;
     public:
         User(){
-            this->pw = "\0";
-            this->uid = "\0";
+            this->pw    = "\0";
+            this->uid   = "\0";
             this->isLIN = 0;
         }
         void setPW(string pw){
@@ -60,12 +60,15 @@ bool checkLogin(const string& input, User& user){
     stringstream ss(input);
     string word, uid, pw;
     ss >> word;
-    if (ss.eof()){
+
+    if (!(ss >> uid)){
         cout << "Too few arguments\n";
         return false;
     }
-    ss >> uid;
-    ss >> pw;
+    if (!(ss >> pw)){
+        cout << "Too few arguments\n";
+        return false;
+    }
     if (ss >> word){
         cout << "Too many arguments\n";
         return false;
@@ -74,32 +77,20 @@ bool checkLogin(const string& input, User& user){
         cout << "User already loggin in\n";
         return false;
     }
-
-    if (uid.length() != 6) {
+    if (!validate_uid(uid)){
         cout << "Invalid UID\n";
         return false;
     }
-    for (int i = 0; i <6; i++){
-        if ((i == 0 && uid[i]=='0') || !isdigit(uid[i])){
-            cout << "Invalid UID\n";
-            return false;
-        }
-    }
-    if (pw.length() != 8){
+    if (!validate_password(pw)){
         cout << "Invalid password\n";
         return false;
     }
-    for (int i = 0; i < 8; i++){
-        if (!isalnum(pw[i])){
-            cout << "Invalid password\n";
-            return false;
-        }
-    }
-    
+
     user.setPW(pw);
     user.setUID(uid);
     return true;
 }
+
 void checkResponseLogin(char* buffer, User& user){
     if (!strcmp(buffer, "RLI OK\n")){
         cout << "successful login\n";
@@ -150,42 +141,20 @@ void checkRespondeLOUT(char* buffer, User& user){
     }
 }
 
-int sendAndReceive(char *buffer, string request, int fd, addrinfo* res, sockaddr_in addr){
-    ssize_t n;
-    socklen_t addrlen;
-    n = sendto(fd, request.c_str(), request.length(), 0, res->ai_addr, res->ai_addrlen);
-    if (n == -1){
-        if (errno != EINTR) perror("sendto");
-        return -1;
-    }
-    addrlen = sizeof(addr);
-    n = recvfrom(fd, buffer, 128, 0, (struct sockaddr*) &addr, &addrlen);
-    if (n == -1){
-        if (errno != EINTR) perror("recvfrom");
-        return -1;
-    }
-    buffer[n] = '\0';
-    return 0;
-}
-
 int main(int argc, char *argv[]){
     string peerport;
     string dsip   = "193.136.138.142";
     string dsport = "59000";
     bool hasPeerport = false;
 
-    // SIGINT (Ctrl+C): sets stopped=1; no SA_RESTART so getline is
-    // interrupted immediately without needing to press Enter
     struct sigaction signalAction{};
     sigemptyset(&signalAction.sa_mask);
     signalAction.sa_handler = signalHandler;
     signalAction.sa_flags = 0;
     sigaction(SIGINT, &signalAction, nullptr);
 
-    // SIGPIPE: ignore — prevents crash if network connection breaks
     signal(SIGPIPE, SIG_IGN);
 
-    // parse ./user -m peerport [-n DSIP] [-p DSport]
     for (int i = 1; i < argc; i++){
         string arg = argv[i];
         if (arg == "-m"){
@@ -214,7 +183,7 @@ int main(int argc, char *argv[]){
     struct sockaddr_in addr;
     struct addrinfo hints, *res;
     struct timeval tmout;
-    tmout.tv_sec  = 6;  
+    tmout.tv_sec  = 6;
     tmout.tv_usec = 0;
 
     fd = socket(AF_INET, SOCK_DGRAM, 0);
@@ -243,7 +212,7 @@ int main(int argc, char *argv[]){
 
     while (!stopped && getline(cin, input)){
         stringstream ss(input);
-        if (!(ss >> command)) continue; // blank line
+        if (!(ss >> command)) continue;
         string word;
 
         if (command == "login"){
@@ -254,7 +223,7 @@ int main(int argc, char *argv[]){
             if (!checkLogin(input, user)) continue;
 
             string request = "LIN " + user.getUID() + " " + user.getPW() + " " + peerport + '\n';
-            if (sendAndReceive(buffer, request, fd, res, addr) == -1) continue;
+            if (sendAndReceive(buffer, sizeof(buffer), request, fd, res, addr) == -1) continue;
             checkResponseLogin(buffer, user);
 
         }else if (command == "unregister"){
@@ -262,7 +231,7 @@ int main(int argc, char *argv[]){
             if (!user.getLIN()){ cout << "No user is currently logged in\n"; continue; }
 
             string request = "UNR " + user.getUID() + " " + user.getPW() + '\n';
-            if (sendAndReceive(buffer, request, fd, res, addr) == -1) continue;
+            if (sendAndReceive(buffer, sizeof(buffer), request, fd, res, addr) == -1) continue;
             checkResponseUNR(buffer, user);
 
         }else if (command == "logout"){
@@ -270,7 +239,7 @@ int main(int argc, char *argv[]){
             if (!user.getLIN()){ cout << "No user is currently logged in\n"; continue; }
 
             string request = "LOU " + user.getUID() + " " + user.getPW() + '\n';
-            if (sendAndReceive(buffer, request, fd, res, addr) == -1) continue;
+            if (sendAndReceive(buffer, sizeof(buffer), request, fd, res, addr) == -1) continue;
             checkRespondeLOUT(buffer, user);
 
         }else if (command == "exit"){
@@ -283,9 +252,7 @@ int main(int argc, char *argv[]){
         }
     }
 
-    if (stopped){
-        cout << "\nProgram exiting safely\n";
-    }
+    if (stopped) cout << "\nInterrupted.\n";
 
     freeaddrinfo(res);
     close(fd);
