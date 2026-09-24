@@ -89,14 +89,16 @@ static void checkResponsePUB(const string& reply){
     else if (reply == "RPB NOK\n") { cout << "unsuccesful publication\n";}
     else if (reply == "RPB NLG\n") { cout << "user not logged in\n";}
     else if (reply == "RPB WRP\n") { cout << "incorrect password\n";}
+    else if (reply == "RPB UNR\n") {cout << "user not registered\n";}
     
 }
 
 static void checkResponseREM(const string& reply){
     if (reply == "RRM OK\n") { cout << "successful removal\n";}
     else if (reply == "RRM NOK\n") { cout << "resource not found\n";}
-    else if (reply == "RRM UNR\n") {cout << "user not logged in\n";}
+    else if (reply == "RRM UNR\n") {cout << "user not registered\n";}
     else if (reply == "RRM WRP\n") {cout << "incorrect password\n";}
+    else if (reply == "RRM NLG\n") {cout << "user not logged in\n";}
 
 }
 
@@ -151,6 +153,7 @@ static void cmd_publish(User& user, const string& filename, const string& label,
         return;
     } 
     char buffer[128];
+    //nao funciona se n tiver uid default perguntar
     string request = "PUB " + user.getUID() + " " + user.getPW() + " " + filename +" " + to_string(fSize) + " " + label + '\n';
     if (sendAndReceive(buffer, sizeof(buffer), request, fd, res, addr) == -1) return;
     checkResponsePUB(string(buffer));
@@ -158,12 +161,15 @@ static void cmd_publish(User& user, const string& filename, const string& label,
 
 static void cmd_remove(User& user, const string& filename, int fd, addrinfo* res, sockaddr_in& addr){
     char buffer[128];
-    string request = "REM" + user.getUID() + " " + user.getPW() +" "+ filename +'\n';
+    string request = "REM " + user.getUID() + " " + user.getPW() +" "+ filename +'\n';
     if (sendAndReceive(buffer, sizeof(buffer), request, fd, res, addr) == -1) return;
     checkResponseREM(string(buffer));
-    return;
 }
 
+static void cmd_list(){ //perguntar como fazer um char do tamanho ideal( faco char[1024]??)
+
+    return;
+}
 
 
 int main(int argc, char *argv[]){
@@ -267,6 +273,10 @@ int main(int argc, char *argv[]){
                 cout << "login: expected 1 arguments\n"; continue;
             }
             cmd_remove(user, w1, fd, res, addr);
+        } else if (command == "list"){
+            if (ss >> extra){ cout << "list: takes no arguments\n"; continue; }
+            
+
 
         }else{
             cout << "unknown command '" << command << "'\n";
