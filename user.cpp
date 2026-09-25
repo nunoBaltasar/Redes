@@ -1,17 +1,13 @@
 #include "clientUDP.h"
+#include "validation.h"
 
 #include <sstream>
 #include <iostream>
 #include <fstream>
+#include <memory>
+#include <stdexcept>
 
-#include <unistd.h>
-#include <stdlib.h>
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
-#include <netdb.h>
-#include <string.h>
+#include <cstdlib>
 #include <csignal>
 
 using namespace std;
@@ -103,7 +99,7 @@ static void checkResponseREM(const string& reply){
 }
 
 static void cmd_login(const string& uid, const string& pw, const string& peerport,
-                      User& user, int fd, addrinfo* res, sockaddr_in& addr){
+                      User& user, ClientUDP& ds){
     if (user.getLIN()){
         cout << "Already logged in as " << user.getUID() << "\n";
         return;
@@ -117,32 +113,32 @@ static void cmd_login(const string& uid, const string& pw, const string& peerpor
         return;
     }
 
-    char buffer[128];
+    string reply;
     string request = "LIN " + uid + " " + pw + " " + peerport + '\n';
-    if (sendAndReceive(buffer, sizeof(buffer), request, fd, res, addr) == -1) return;
-    checkResponseLogin(string(buffer), user, uid, pw);
+    if (!ds.sendAndReceive(request, reply)) return;
+    checkResponseLogin(reply, user, uid, pw);
 }
 
-static void cmd_logout(User& user, int fd, addrinfo* res, sockaddr_in& addr){
+static void cmd_logout(User& user, ClientUDP& ds){
     if (!user.getLIN()){ cout << "No user is currently logged in\n"; return; }
 
-    char buffer[128];
+    string reply;
     string request = "LOU " + user.getUID() + " " + user.getPW() + '\n';
-    if (sendAndReceive(buffer, sizeof(buffer), request, fd, res, addr) == -1) return;
-    checkRespondeLOUT(string(buffer), user);
+    if (!ds.sendAndReceive(request, reply)) return;
+    checkRespondeLOUT(reply, user);
 }
 
-static void cmd_unregister(User& user, int fd, addrinfo* res, sockaddr_in& addr){
+static void cmd_unregister(User& user, ClientUDP& ds){
     if (!user.getLIN()){ cout << "No user is currently logged in\n"; return; }
 
-    char buffer[128];
+    string reply;
     string request = "UNR " + user.getUID() + " " + user.getPW() + '\n';
-    if (sendAndReceive(buffer, sizeof(buffer), request, fd, res, addr) == -1) return;
-    checkResponseUNR(string(buffer), user);
+    if (!ds.sendAndReceive(request, reply)) return;
+    checkResponseUNR(reply, user);
 }
 
 static void cmd_publish(User& user, const string& filename, const string& label, 
-                        int fd, addrinfo* res, sockaddr_in& addr){
+                        ClientUDP& ds){
     streamsize fSize;
     ifstream file(filename.c_str(), ios::binary | ios::ate);
     if (file.is_open()) {
@@ -152,18 +148,18 @@ static void cmd_publish(User& user, const string& filename, const string& label,
         cout << "Error: file doesn't exit in current directory\n";
         return;
     } 
-    char buffer[128];
+    string reply;
     //nao funciona se n tiver uid default perguntar
     string request = "PUB " + user.getUID() + " " + user.getPW() + " " + filename +" " + to_string(fSize) + " " + label + '\n';
-    if (sendAndReceive(buffer, sizeof(buffer), request, fd, res, addr) == -1) return;
-    checkResponsePUB(string(buffer));
+    if (!ds.sendAndReceive(request, reply)) return;
+    checkResponsePUB(reply);
 }
 
-static void cmd_remove(User& user, const string& filename, int fd, addrinfo* res, sockaddr_in& addr){
-    char buffer[128];
+static void cmd_remove(User& user, const string& filename, ClientUDP& ds){
+    string reply;
     string request = "REM " + user.getUID() + " " + user.getPW() +" "+ filename +'\n';
-    if (sendAndReceive(buffer, sizeof(buffer), request, fd, res, addr) == -1) return;
-    checkResponseREM(string(buffer));
+    if (!ds.sendAndReceive(request, reply)) return;
+    checkResponseREM(reply);
 }
 
 static void cmd_list(){ //perguntar como fazer um char do tamanho ideal( faco char[1024]??)
@@ -208,30 +204,11 @@ int main(int argc, char *argv[]){
         exit(1);
     }
 
-    int fd, errcode;
-    struct sockaddr_in addr;
-    struct addrinfo hints, *res;
-    struct timeval tmout;
-    tmout.tv_sec  = 6;
-    tmout.tv_usec = 0;
-
-    fd = socket(AF_INET, SOCK_DGRAM, 0);
-    if (fd == -1){ perror("socket"); exit(1); }
-
-    memset(&hints, 0, sizeof(hints));
-    hints.ai_family   = AF_INET;
-    hints.ai_socktype = SOCK_DGRAM;
-    errcode = getaddrinfo(dsip.c_str(), dsport.c_str(), &hints, &res);
-    if (errcode != 0){
-        cout << "getaddrinfo: " << gai_strerror(errcode) << "\n";
-        close(fd);
-        exit(1);
-    }
-
-    if (setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tmout, sizeof(tmout)) < 0){
-        cout << "Error: socket timeout\n";
-        freeaddrinfo(res);
-        close(fd);
+    unique_ptr<ClientUDP> ds;
+    try{
+        ds.reset(new ClientUDP(dsip, dsport));
+    }catch (const exception& e){
+        cout << e.what() << "\n";
         exit(1);
     }
 
@@ -247,15 +224,15 @@ int main(int argc, char *argv[]){
             if (!(ss >> w1) || !(ss >> w2) || (ss >> extra)){
                 cout << "login: expected 2 arguments (UID password)\n"; continue;
             }
-            cmd_login(w1, w2, peerport, user, fd, res, addr);
+            cmd_login(w1, w2, peerport, user, *ds);
 
         }else if (command == "logout"){
             if (ss >> extra){ cout << "logout: takes no arguments\n"; continue; }
-            cmd_logout(user, fd, res, addr);
+            cmd_logout(user, *ds);
 
         }else if (command == "unregister"){
             if (ss >> extra){ cout << "unregister: takes no arguments\n"; continue; }
-            cmd_unregister(user, fd, res, addr);
+            cmd_unregister(user, *ds);
 
         }else if (command == "exit"){
             if (ss >> extra){ cout << "exit: takes no arguments\n"; continue; }
@@ -266,13 +243,13 @@ int main(int argc, char *argv[]){
             if (!(ss >> w1) || !(ss >> w2) || (ss >> extra)){
                 cout << "login: expected 2 arguments\n"; continue;
             }
-            cmd_publish(user, w1, w2, fd, res, addr);
+            cmd_publish(user, w1, w2, *ds);
             
         } else if (command == "remove"){ 
             if (!(ss >> w1) || (ss >> extra)){
                 cout << "login: expected 1 arguments\n"; continue;
             }
-            cmd_remove(user, w1, fd, res, addr);
+            cmd_remove(user, w1, *ds);
         } else if (command == "list"){
             if (ss >> extra){ cout << "list: takes no arguments\n"; continue; }
             
@@ -285,7 +262,5 @@ int main(int argc, char *argv[]){
 
     if (stopped) cout << "\nInterrupted.\n";
 
-    freeaddrinfo(res);
-    close(fd);
     return 0;
 }
