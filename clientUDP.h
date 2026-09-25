@@ -1,5 +1,5 @@
-#ifndef PROTOCOL_H
-#define PROTOCOL_H
+#ifndef CLIENTUDP_H
+#define CLIENTUDP_H
 
 #include <string>
 #include <netdb.h>

@@ -1,4 +1,4 @@
-#include "protocol.h"
+#include "clientUDP.h"
 
 #include <sstream>
 #include <iostream>
@@ -62,7 +62,7 @@ static void checkResponseLogin(const string& reply, User& user, const string& ui
     if      (reply == "RLI OK\n")  { cout << "successful login\n";    user.setUID(uid); user.setPW(pw); user.setLIN(); }
     else if (reply == "RLI NOK\n") { cout << "incorrect login\n";                                                      }
     else if (reply == "RLI REG\n") { cout << "new user registered\n"; user.setUID(uid); user.setPW(pw); user.setLIN(); }
-    else if (reply == "ERR\n")     { cout << "protocol error\n";                                                       }
+    else if (reply == "ERR\n")     { cout << "clientUDP error\n";                                                       }
     else                           { cout << "unexpected reply: " << reply;                                            }
 }
 
@@ -71,7 +71,7 @@ static void checkRespondeLOUT(const string& reply, User& user){
     else if (reply == "RLO NLG\n") { cout << "user not logged in\n";                  }
     else if (reply == "RLO WRP\n") { cout << "incorrect password\n";                  }
     else if (reply == "RLO UNR\n") { cout << "unknown user\n";                        }
-    else if (reply == "ERR\n")     { cout << "protocol error\n";                      }
+    else if (reply == "ERR\n")     { cout << "clientUDP error\n";                      }
     else                           { cout << "unexpected reply: " << reply;           }
 }
 
@@ -80,7 +80,7 @@ static void checkResponseUNR(const string& reply, User& user){
     else if (reply == "RUR NOK\n") { cout << "unknown user or not logged in\n";                 }
     else if (reply == "RUR WRP\n") { cout << "incorrect password\n";                            }
     else if (reply == "RUR UNR\n") { cout << "user not registered\n";                           }
-    else if (reply == "ERR\n")     { cout << "protocol error\n";                                }
+    else if (reply == "ERR\n")     { cout << "clientUDP error\n";                                }
     else                           { cout << "unexpected reply: " << reply;                     }
 }
 

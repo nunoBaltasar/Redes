@@ -3,8 +3,8 @@ CFLAGS = -Wall -Wextra -std=c++11
 
 all: user
 
-user: user.cpp protocol.cpp protocol.h
-	$(CC) $(CFLAGS) -o user user.cpp protocol.cpp
+user: user.cpp clientUDP.cpp clientUDP.h
+	$(CC) $(CFLAGS) -o user user.cpp clientUDP.cpp
 
 clean:
 	rm -f user
