@@ -10,6 +10,9 @@
 #include <cstdlib>
 #include <csignal>
 
+#define DEF_DSPORT "59000"
+#define DEF_DSIP "193.136.138.142"
+
 using namespace std;
 
 static volatile sig_atomic_t stopped = 0;
@@ -91,7 +94,7 @@ static void checkResponsePUB(const string& reply){
 
 static void checkResponseREM(const string& reply){
     if (reply == "RRM OK\n") { cout << "successful removal\n";}
-    else if (reply == "RRM NOK\n") { cout << "resource not found\n";}
+    else if (reply == "RRM NOK\n") { cout << "resource not found\n";} //implica n poder remover pub de outras pessoas?
     else if (reply == "RRM UNR\n") {cout << "user not registered\n";}
     else if (reply == "RRM WRP\n") {cout << "incorrect password\n";}
     else if (reply == "RRM NLG\n") {cout << "user not logged in\n";}
@@ -139,8 +142,13 @@ static void cmd_unregister(User& user, ClientUDP& ds){
 
 static void cmd_publish(User& user, const string& filename, const string& label, 
                         ClientUDP& ds){
+    if (!user.getLIN()){
+        cout << "User not logged in\n";
+        return;
+    }
     streamsize fSize;
     ifstream file(filename.c_str(), ios::binary | ios::ate);
+    
     if (file.is_open()) {
         fSize = file.tellg();
         file.close();
@@ -149,29 +157,48 @@ static void cmd_publish(User& user, const string& filename, const string& label,
         return;
     } 
     string reply;
-    //nao funciona se n tiver uid default perguntar
     string request = "PUB " + user.getUID() + " " + user.getPW() + " " + filename +" " + to_string(fSize) + " " + label + '\n';
     if (!ds.sendAndReceive(request, reply)) return;
     checkResponsePUB(reply);
 }
 
 static void cmd_remove(User& user, const string& filename, ClientUDP& ds){
+    if (!user.getLIN()){
+        cout << "User not logged in\n";
+        return;
+    }
     string reply;
     string request = "REM " + user.getUID() + " " + user.getPW() +" "+ filename +'\n';
     if (!ds.sendAndReceive(request, reply)) return;
     checkResponseREM(reply);
 }
 
-static void cmd_list(){ //perguntar como fazer um char do tamanho ideal( faco char[1024]??)
-
-    return;
+static void checkResponseLST(string reply){
+    if (reply == "RLS NOK\n") { cout << "no published resources yet\n";}
 }
 
+static void cmd_list(ClientUDP& ds){ 
+    char buffer[65536];
+    string request = "LST\n";
+    string reply;
+    int i = 1;
+    if (!ds.sendAndReceive(request, reply)) return;
+    checkResponseLST(string(buffer));
+    stringstream ss(reply);
+    string word;
+    ss >> word >> word;
+    cout << "Available files:\n";
+    while (ss >> word){
+        if (i>=50) return;
+        cout << "File " + to_string(i) + " - " + word << endl;
+        i++;
+    }
+}
 
 int main(int argc, char *argv[]){
     string peerport;
-    string dsip   = "193.136.138.142";
-    string dsport = "59000";
+    string dsip   = DEF_DSIP;
+    string dsport = DEF_DSPORT;
     bool hasPeerport = false;
 
     struct sigaction sa{};
@@ -252,7 +279,37 @@ int main(int argc, char *argv[]){
             cmd_remove(user, w1, *ds);
         } else if (command == "list"){
             if (ss >> extra){ cout << "list: takes no arguments\n"; continue; }
+            cmd_list(*ds);
+        } else if (command == "versions"){
+            string filename;
+            if (!(ss >> filename) || (ss >> extra)){
+                cout << "login: expected 2 arguments\n"; continue;
+            }
+            int fdTCP, n;
+            fdTCP = socket(AF_INET, SOCK_STREAM, 0);
+            addrinfo  hintsTCP{}, *res;
             
+            hintsTCP.ai_family = AF_INET;
+            hintsTCP.ai_socktype = SOCK_STREAM;
+            int errcodeTCP = getaddrinfo(dsip.c_str(), peerport.c_str(), &hintsTCP, &res);
+            if (errcodeTCP != 0){
+                close(fdTCP);
+                throw runtime_error(string("getaddrinfo: ") + gai_strerror(errcodeTCP));
+            }
+            timeval tmout{};
+            tmout.tv_sec = 5;
+            if (setsockopt(fdTCP, SOL_SOCKET, SO_RCVTIMEO, &tmout, sizeof(tmout)) < 0){
+                freeaddrinfo(res);
+                close(fdTCP);
+                //throw runtime_error(string("setsockopt: ") + strerror(errno));
+            }
+            n = connect(fdTCP, res->ai_addr, res->ai_addrlen);
+            if (n==-1) exit(1);
+            
+            string request = "VRS " + filename + '\n';
+            char reply[128]; 
+            n = write(fdTCP, request.c_str(), request.length());
+            n = read(fdTCP, reply, sizeof(reply));
 
 
         }else{
@@ -262,5 +319,7 @@ int main(int argc, char *argv[]){
 
     if (stopped) cout << "\nInterrupted.\n";
 
+    //freeaddrinfo(res);
+    //close(fdTCP);
     return 0;
 }
