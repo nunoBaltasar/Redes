@@ -195,6 +195,8 @@ static void cmd_list(ClientUDP& ds){
     }
 }
 
+
+
 int main(int argc, char *argv[]){
     string peerport;
     string dsip   = DEF_DSIP;
@@ -242,6 +244,27 @@ int main(int argc, char *argv[]){
     string input, command;
     User user{};
 
+
+    int fdTCP, n;
+    addrinfo  hintsTCP{}, *resTCP;
+    hintsTCP.ai_family = AF_INET;
+    hintsTCP.ai_socktype = SOCK_STREAM;
+    fdTCP = socket(AF_INET,  SOCK_STREAM, 0);
+    int errcodeTCP = getaddrinfo(dsip.c_str(), dsport.c_str(), &hintsTCP, &resTCP);
+    if (errcodeTCP != 0){
+        throw runtime_error(string("getaddrinfo: ") + gai_strerror(errcodeTCP));
+    }
+    
+    n = connect(fdTCP, resTCP->ai_addr, resTCP->ai_addrlen);
+    if (n==-1) exit(1);
+    timeval tmout{};
+    tmout.tv_sec = 5;
+    if (setsockopt(fdTCP, SOL_SOCKET, SO_RCVTIMEO, &tmout, sizeof(tmout)) < 0){
+        freeaddrinfo(resTCP);
+        close(fdTCP);
+        //throw runtime_error(string("setsockopt: ") + strerror(errno));
+    }
+
     while (!stopped && getline(cin, input)){
         stringstream ss(input);
         if (!(ss >> command)) continue;
@@ -280,37 +303,20 @@ int main(int argc, char *argv[]){
         } else if (command == "list"){
             if (ss >> extra){ cout << "list: takes no arguments\n"; continue; }
             cmd_list(*ds);
+
         } else if (command == "versions"){
             string filename;
             if (!(ss >> filename) || (ss >> extra)){
                 cout << "login: expected 2 arguments\n"; continue;
             }
-            int fdTCP, n;
-            fdTCP = socket(AF_INET, SOCK_STREAM, 0);
-            addrinfo  hintsTCP{}, *res;
-            
-            hintsTCP.ai_family = AF_INET;
-            hintsTCP.ai_socktype = SOCK_STREAM;
-            int errcodeTCP = getaddrinfo(dsip.c_str(), peerport.c_str(), &hintsTCP, &res);
-            if (errcodeTCP != 0){
-                close(fdTCP);
-                throw runtime_error(string("getaddrinfo: ") + gai_strerror(errcodeTCP));
-            }
-            timeval tmout{};
-            tmout.tv_sec = 5;
-            if (setsockopt(fdTCP, SOL_SOCKET, SO_RCVTIMEO, &tmout, sizeof(tmout)) < 0){
-                freeaddrinfo(res);
-                close(fdTCP);
-                //throw runtime_error(string("setsockopt: ") + strerror(errno));
-            }
-            n = connect(fdTCP, res->ai_addr, res->ai_addrlen);
-            if (n==-1) exit(1);
             
             string request = "VRS " + filename + '\n';
             char reply[128]; 
             n = write(fdTCP, request.c_str(), request.length());
-            n = read(fdTCP, reply, sizeof(reply));
-
+            if (n==-1) exit(1);
+            n = read(fdTCP, reply, 128);
+            if (n==-1) exit(1);
+            cout << reply << endl;
 
         }else{
             cout << "unknown command '" << command << "'\n";
@@ -319,7 +325,7 @@ int main(int argc, char *argv[]){
 
     if (stopped) cout << "\nInterrupted.\n";
 
-    //freeaddrinfo(res);
-    //close(fdTCP);
+    freeaddrinfo(resTCP);
+    close(fdTCP);
     return 0;
 }
