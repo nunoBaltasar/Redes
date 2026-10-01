@@ -56,12 +56,15 @@ class User{
         }
 };
 
+static void printErr(){
+    cout << "request rejected by DS (invalid syntax or values)\n";
+}
 
 static void checkResponseLogin(const string& reply, User& user, const string& uid, const string& pw){
     if      (reply == "RLI OK\n")  { cout << "successful login\n";    user.setUID(uid); user.setPW(pw); user.setLIN(); }
     else if (reply == "RLI NOK\n") { cout << "incorrect login\n";                                                      }
     else if (reply == "RLI REG\n") { cout << "new user registered\n"; user.setUID(uid); user.setPW(pw); user.setLIN(); }
-    else if (reply == "ERR\n")     { cout << "clientUDP error\n";                                                       }
+    else if (reply == "RLI ERR\n" || reply == "ERR\n") { printErr();                                                  }
     else                           { cout << "unexpected reply: " << reply;                                            }
 }
 
@@ -70,7 +73,7 @@ static void checkRespondeLOUT(const string& reply, User& user){
     else if (reply == "RLO NLG\n") { cout << "user not logged in\n";                  }
     else if (reply == "RLO WRP\n") { cout << "incorrect password\n";                  }
     else if (reply == "RLO UNR\n") { cout << "unknown user\n";                        }
-    else if (reply == "ERR\n")     { cout << "clientUDP error\n";                      }
+    else if (reply == "RLO ERR\n" || reply == "ERR\n") { printErr();                 }
     else                           { cout << "unexpected reply: " << reply;           }
 }
 
@@ -79,7 +82,7 @@ static void checkResponseUNR(const string& reply, User& user){
     else if (reply == "RUR NOK\n") { cout << "unknown user or not logged in\n";                 }
     else if (reply == "RUR WRP\n") { cout << "incorrect password\n";                            }
     else if (reply == "RUR UNR\n") { cout << "user not registered\n";                           }
-    else if (reply == "ERR\n")     { cout << "clientUDP error\n";                                }
+    else if (reply == "RUR ERR\n" || reply == "ERR\n") { printErr();                          }
     else                           { cout << "unexpected reply: " << reply;                     }
 }
 
@@ -89,7 +92,8 @@ static void checkResponsePUB(const string& reply){
     else if (reply == "RPB NLG\n") { cout << "user not logged in\n";}
     else if (reply == "RPB WRP\n") { cout << "incorrect password\n";}
     else if (reply == "RPB UNR\n") {cout << "user not registered\n";}
-    
+    else if (reply == "RPB ERR\n" || reply == "ERR\n") { printErr(); }
+    else                           { cout << "unexpected reply: " << reply; }
 }
 
 static void checkResponseREM(const string& reply){
@@ -98,7 +102,8 @@ static void checkResponseREM(const string& reply){
     else if (reply == "RRM UNR\n") {cout << "user not registered\n";}
     else if (reply == "RRM WRP\n") {cout << "incorrect password\n";}
     else if (reply == "RRM NLG\n") {cout << "user not logged in\n";}
-
+    else if (reply == "RRM ERR\n" || reply == "ERR\n") { printErr(); }
+    else                           { cout << "unexpected reply: " << reply; }
 }
 
 static void cmd_login(const string& uid, const string& pw, const string& peerport,
@@ -230,6 +235,14 @@ int main(int argc, char *argv[]){
     }
     if (!hasPeerport){
         cout << "Usage: " << argv[0] << " -m peerport [-n DSIP] [-p DSport]\n";
+        exit(1);
+    }
+    if (!validate_port(peerport)){
+        cout << "Invalid peerport '" << peerport << "' (must be an integer from 1 to 65535)\n";
+        exit(1);
+    }
+    if (!validate_port(dsport)){
+        cout << "Invalid DSport '" << dsport << "' (must be an integer from 1 to 65535)\n";
         exit(1);
     }
 
